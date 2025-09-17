@@ -1,9 +1,11 @@
+import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/extensions.dart';
 import 'package:flame/game.dart';
 import 'package:flame_forge2d/flame_forge2d.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(
@@ -15,42 +17,158 @@ void main() {
   );
 }
 
-class MouseJointExample extends Forge2DGame {
-  static const description = '''
-    In this example we use a MouseJoint to make the ball follow the mouse
-    when you drag it around.
-  ''';
+class MouseJointExample extends Forge2DGame with HasKeyboardHandlerComponents {
+  late MouseJointWorld gameWorld;
 
-  MouseJointExample()
-    : super(gravity: Vector2(0, 10.0), world: MouseJointWorld());
+  MouseJointExample() : super(gravity: Vector2(0, 10.0)) {
+    gameWorld = MouseJointWorld();
+  }
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    world = gameWorld; // Set the world
+  }
+
+  // Keyboard shortcuts (optional)
+  @override
+  KeyEventResult onKeyEvent(
+    KeyEvent event,
+    Set<LogicalKeyboardKey> keysPressed,
+  ) {
+    if (keysPressed.contains(LogicalKeyboardKey.space)) {
+      gameWorld.spawnBallRain(5);
+      return KeyEventResult.handled;
+    }
+    if (keysPressed.contains(LogicalKeyboardKey.keyC)) {
+      gameWorld.clearAllBalls();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 }
 
 class MouseJointWorld extends Forge2DWorld
     with DragCallbacks, HasGameReference<Forge2DGame> {
-  late Ball ball;
+  final List<Ball> balls = [];
   late Body groundBody;
   MouseJoint? mouseJoint;
+  Ball? selectedBall;
+
+  // Ball spawning variables
+  final Random random = Random();
+  late TimerComponent ballSpawner;
+  final int maxBalls = 50;
+  final double spawnInterval = 0.5;
 
   @override
   Future<void> onLoad() async {
     super.onLoad();
 
-    // Create boundaries
-    final boundaries = createBoundaries(game);
+    // Create boundaries WITHOUT the top wall
+    final boundaries = createBoundariesWithoutTop(game);
     addAll(boundaries);
 
-    // Create ground body for mouse joint
     final groundBodyDef = BodyDef();
     groundBody = createBody(groundBodyDef);
 
-    // Create ball at center
-    final center = Vector2.zero();
-    ball = Ball(center, radius: 5);
+    // Start spawning balls automatically
+    startBallSpawning();
+
+    // Spawn initial batch of balls
+    spawnInitialBalls(5);
+  }
+
+  void startBallSpawning() {
+    ballSpawner = TimerComponent(
+      period: spawnInterval,
+      repeat: true,
+      onTick: () {
+        if (balls.length < maxBalls) {
+          spawnRandomBall();
+        }
+      },
+    );
+    add(ballSpawner);
+  }
+
+  void spawnInitialBalls(int count) {
+    for (int i = 0; i < count; i++) {
+      Future.delayed(Duration(milliseconds: i * 100), () {
+        if (balls.length < maxBalls) {
+          spawnRandomBall();
+        }
+      });
+    }
+  }
+
+  void spawnRandomBall() {
+    final visibleRect = game.camera.visibleWorldRect;
+
+    final randomX = visibleRect.left + random.nextDouble() * visibleRect.width;
+    // Spawn balls well above the visible area so they fall in
+    final spawnY = visibleRect.top - 10;
+
+    final radius = 2.0 + random.nextDouble() * 6.0;
+
+    final ball = Ball(Vector2(randomX, spawnY), radius: radius);
+
+    balls.add(ball);
     add(ball);
 
-    // Add some ramps for fun
-    add(CornerRamp(center));
-    add(CornerRamp(center, isMirrored: true));
+    // Add some random horizontal velocity
+    Future.delayed(Duration(milliseconds: 100), () {
+      if (ball.isMounted) {
+        final horizontalForce = (random.nextDouble() - 0.5) * 200;
+        ball.body.applyLinearImpulse(Vector2(horizontalForce, 0));
+      }
+    });
+  }
+
+  void spawnBallRain(int count) {
+    for (int i = 0; i < count && balls.length < maxBalls; i++) {
+      spawnRandomBall();
+    }
+  }
+
+  void cleanupOffscreenBalls() {
+    final visibleRect = game.camera.visibleWorldRect;
+    final ballsToRemove = <Ball>[];
+
+    for (final ball in balls) {
+      if (ball.body.position.y > visibleRect.bottom + 50) {
+        ballsToRemove.add(ball);
+      }
+    }
+
+    for (final ball in ballsToRemove) {
+      balls.remove(ball);
+      ball.removeFromParent();
+    }
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+
+    if (balls.length > 10) {
+      cleanupOffscreenBalls();
+    }
+  }
+
+  Ball? findBallAtPosition(Vector2 position) {
+    Ball? closestBall;
+    double closestDistance = double.infinity;
+
+    for (final ball in balls) {
+      final distance = (ball.body.position - position).length;
+      if (distance < ball.radius && distance < closestDistance) {
+        closestDistance = distance;
+        closestBall = ball;
+      }
+    }
+
+    return closestBall;
   }
 
   @override
@@ -60,14 +178,17 @@ class MouseJointWorld extends Forge2DWorld
       return;
     }
 
+    selectedBall = findBallAtPosition(event.localPosition);
+    if (selectedBall == null) return;
+
     final mouseJointDef = MouseJointDef()
-      ..maxForce = 3000 * ball.body.mass * 10
+      ..maxForce = 3000 * selectedBall!.body.mass * 10
       ..dampingRatio = 0.1
       ..frequencyHz = 5
-      ..target.setFrom(ball.body.position)
+      ..target.setFrom(selectedBall!.body.position)
       ..collideConnected = false
       ..bodyA = groundBody
-      ..bodyB = ball.body;
+      ..bodyB = selectedBall!.body;
 
     mouseJoint = MouseJoint(mouseJointDef);
     createJoint(mouseJoint!);
@@ -84,7 +205,15 @@ class MouseJointWorld extends Forge2DWorld
     if (mouseJoint != null) {
       destroyJoint(mouseJoint!);
       mouseJoint = null;
+      selectedBall = null;
     }
+  }
+
+  void clearAllBalls() {
+    for (final ball in balls) {
+      ball.removeFromParent();
+    }
+    balls.clear();
   }
 }
 
@@ -120,7 +249,6 @@ class Ball extends BodyComponent {
 
     canvas.drawCircle(Offset.zero, radius, paint);
 
-    // Border
     final borderPaint = Paint()
       ..color = Colors.deepOrange
       ..style = PaintingStyle.stroke
@@ -128,87 +256,6 @@ class Ball extends BodyComponent {
 
     canvas.drawCircle(Offset.zero, radius, borderPaint);
   }
-}
-
-// Corner ramp component
-class CornerRamp extends BodyComponent {
-  final Vector2 _position;
-  final bool isMirrored;
-
-  CornerRamp(this._position, {this.isMirrored = false});
-
-  @override
-  Body createBody() {
-    final bodyDef = BodyDef()
-      ..type = BodyType.static
-      ..position.setFrom(_position);
-
-    final body = world.createBody(bodyDef);
-
-    final vertices = <Vector2>[
-      Vector2(-20, 0),
-      Vector2(-20, -10),
-      Vector2(20, -10),
-      Vector2(20, 0),
-    ];
-
-    if (isMirrored) {
-      for (final vertex in vertices) {
-        vertex.x *= -1;
-      }
-    }
-
-    final shape = PolygonShape()..set(vertices);
-    final fixtureDef = FixtureDef(shape)..friction = 0.3;
-
-    body.createFixture(fixtureDef);
-    return body;
-  }
-
-  @override
-  void render(Canvas canvas) {
-    final paint = Paint()
-      ..color = Colors.green
-      ..style = PaintingStyle.fill;
-
-    final path = Path();
-    final vertices = [
-      Offset(-20, 0),
-      Offset(-20, -10),
-      Offset(20, -10),
-      Offset(20, 0),
-    ];
-
-    if (isMirrored) {
-      for (int i = 0; i < vertices.length; i++) {
-        vertices[i] = Offset(-vertices[i].dx, vertices[i].dy);
-      }
-    }
-
-    path.moveTo(vertices[0].dx, vertices[0].dy);
-    for (int i = 1; i < vertices.length; i++) {
-      path.lineTo(vertices[i].dx, vertices[i].dy);
-    }
-    path.close();
-
-    canvas.drawPath(path, paint);
-  }
-}
-
-// Boundary creation utility
-List<Wall> createBoundaries(Forge2DGame game) {
-  final visibleRect = game.camera.visibleWorldRect;
-  final topLeft = visibleRect.topLeft.toVector2();
-  final topRight = visibleRect.topRight.toVector2();
-  final bottomLeft = visibleRect.bottomLeft.toVector2();
-  final bottomRight = visibleRect.bottomRight.toVector2();
-
-  return [
-    Wall(topLeft, topRight), // Top
-    Wall(topRight, bottomRight), // Right
-    Wall(bottomRight, bottomLeft), // Bottom
-    Wall(bottomLeft, topLeft), // Left
-  ];
 }
 
 // Wall component
@@ -239,4 +286,25 @@ class Wall extends BodyComponent {
 
     canvas.drawLine(Offset(_start.x, _start.y), Offset(_end.x, _end.y), paint);
   }
+}
+
+// Modified boundary creation - WITHOUT top wall
+List<Wall> createBoundariesWithoutTop(Forge2DGame game) {
+  final visibleRect = game.camera.visibleWorldRect;
+  final topRight = visibleRect.topRight.toVector2();
+  final bottomLeft = visibleRect.bottomLeft.toVector2();
+  final bottomRight = visibleRect.bottomRight.toVector2();
+  final topLeft = visibleRect.topLeft.toVector2();
+
+  return [
+    // No top wall - balls can fall in from above
+    Wall(topRight, bottomRight), // Right wall
+    Wall(bottomRight, bottomLeft), // Bottom wall
+    Wall(bottomLeft, topLeft), // Left wall
+  ];
+}
+
+// Alternative: Create boundaries with an invisible top (if you want to keep the function name)
+List<Wall> createBoundaries(Forge2DGame game) {
+  return createBoundariesWithoutTop(game);
 }
