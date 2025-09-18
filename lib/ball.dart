@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:flame/components.dart';
@@ -12,11 +13,21 @@ class BallWithSprite extends BodyComponent {
   bool _spriteLoaded = false;
 
   BallWithSprite(this._position, {this.radius = 2.0});
-
+  List<String> fruits = [
+    'apple',
+    'bananas',
+    'fruit',
+    'passion-fruit',
+    'pineapple',
+    'watermelon',
+  ];
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    ballSprite = await game.loadSprite('apple.png');
+    Random rand = Random();
+    ballSprite = await game.loadSprite(
+      '${fruits[rand.nextInt(fruits.length)]}.png',
+    );
     _spriteLoaded = true;
   }
 

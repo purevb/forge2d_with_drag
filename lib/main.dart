@@ -6,6 +6,9 @@ import 'package:flame/game.dart';
 import 'package:flame_forge2d/flame_forge2d.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:suika_forge2d/ball.dart';
+import 'package:suika_forge2d/basket.dart';
+import 'package:suika_forge2d/wall.dart';
 
 void main() {
   runApp(
@@ -27,10 +30,9 @@ class MouseJointExample extends Forge2DGame with HasKeyboardHandlerComponents {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    world = gameWorld; // Set the world
+    world = gameWorld;
   }
 
-  // Keyboard shortcuts (optional)
   @override
   KeyEventResult onKeyEvent(
     KeyEvent event,
@@ -50,32 +52,29 @@ class MouseJointExample extends Forge2DGame with HasKeyboardHandlerComponents {
 
 class MouseJointWorld extends Forge2DWorld
     with DragCallbacks, HasGameReference<Forge2DGame> {
-  final List<Ball> balls = [];
+  final List<BallWithSprite> balls = [];
   late Body groundBody;
   MouseJoint? mouseJoint;
-  Ball? selectedBall;
+  BallWithSprite? selectedBall;
 
-  // Ball spawning variables
   final Random random = Random();
   late TimerComponent ballSpawner;
-  final int maxBalls = 50;
-  final double spawnInterval = 0.5;
+  final int maxBalls = 5;
+  final double spawnInterval = 10;
 
   @override
   Future<void> onLoad() async {
     super.onLoad();
 
-    // Create boundaries WITHOUT the top wall
     final boundaries = createBoundariesWithoutTop(game);
     addAll(boundaries);
 
+    add(BasketSprite(Vector2(8.5, 0)));
+    add(BasketSprite(Vector2(-8.5, 0)));
+
     final groundBodyDef = BodyDef();
     groundBody = createBody(groundBodyDef);
-
-    // Start spawning balls automatically
     startBallSpawning();
-
-    // Spawn initial batch of balls
     spawnInitialBalls(5);
   }
 
@@ -104,19 +103,14 @@ class MouseJointWorld extends Forge2DWorld
 
   void spawnRandomBall() {
     final visibleRect = game.camera.visibleWorldRect;
-
-    final randomX = visibleRect.left + random.nextDouble() * visibleRect.width;
-    // Spawn balls well above the visible area so they fall in
+    final leftLimit = visibleRect.left + 10;
+    final rightLimit = visibleRect.right - 10;
+    final randomX = leftLimit + random.nextDouble() * (rightLimit - leftLimit);
     final spawnY = visibleRect.top - 10;
-
-    final radius = 2.0 + random.nextDouble() * 6.0;
-
-    final ball = Ball(Vector2(randomX, spawnY), radius: radius);
-
+    final radius = 2.0 + random.nextDouble() * 1.0;
+    final ball = BallWithSprite(Vector2(randomX, spawnY), radius: radius);
     balls.add(ball);
     add(ball);
-
-    // Add some random horizontal velocity
     Future.delayed(Duration(milliseconds: 100), () {
       if (ball.isMounted) {
         final horizontalForce = (random.nextDouble() - 0.5) * 200;
@@ -133,8 +127,7 @@ class MouseJointWorld extends Forge2DWorld
 
   void cleanupOffscreenBalls() {
     final visibleRect = game.camera.visibleWorldRect;
-    final ballsToRemove = <Ball>[];
-
+    final ballsToRemove = <BallWithSprite>[];
     for (final ball in balls) {
       if (ball.body.position.y > visibleRect.bottom + 50) {
         ballsToRemove.add(ball);
@@ -156,8 +149,8 @@ class MouseJointWorld extends Forge2DWorld
     }
   }
 
-  Ball? findBallAtPosition(Vector2 position) {
-    Ball? closestBall;
+  BallWithSprite? findBallAtPosition(Vector2 position) {
+    BallWithSprite? closestBall;
     double closestDistance = double.infinity;
 
     for (final ball in balls) {
@@ -217,78 +210,6 @@ class MouseJointWorld extends Forge2DWorld
   }
 }
 
-// Ball component
-class Ball extends BodyComponent {
-  final Vector2 _position;
-  final double radius;
-
-  Ball(this._position, {this.radius = 2.0});
-
-  @override
-  Body createBody() {
-    final bodyDef = BodyDef()
-      ..type = BodyType.dynamic
-      ..position.setFrom(_position);
-
-    final body = world.createBody(bodyDef);
-    final shape = CircleShape()..radius = radius;
-    final fixtureDef = FixtureDef(shape)
-      ..density = 1.0
-      ..friction = 0.4
-      ..restitution = 0.8;
-
-    body.createFixture(fixtureDef);
-    return body;
-  }
-
-  @override
-  void render(Canvas canvas) {
-    final paint = Paint()
-      ..color = Colors.orange
-      ..style = PaintingStyle.fill;
-
-    canvas.drawCircle(Offset.zero, radius, paint);
-
-    final borderPaint = Paint()
-      ..color = Colors.deepOrange
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.2;
-
-    canvas.drawCircle(Offset.zero, radius, borderPaint);
-  }
-}
-
-// Wall component
-class Wall extends BodyComponent {
-  final Vector2 _start;
-  final Vector2 _end;
-
-  Wall(this._start, this._end);
-
-  @override
-  Body createBody() {
-    final bodyDef = BodyDef()..type = BodyType.static;
-    final body = world.createBody(bodyDef);
-
-    final shape = EdgeShape()..set(_start, _end);
-    final fixtureDef = FixtureDef(shape)..friction = 0.3;
-
-    body.createFixture(fixtureDef);
-    return body;
-  }
-
-  @override
-  void render(Canvas canvas) {
-    final paint = Paint()
-      ..color = Colors.blue
-      ..strokeWidth = 0.4
-      ..style = PaintingStyle.stroke;
-
-    canvas.drawLine(Offset(_start.x, _start.y), Offset(_end.x, _end.y), paint);
-  }
-}
-
-// Modified boundary creation - WITHOUT top wall
 List<Wall> createBoundariesWithoutTop(Forge2DGame game) {
   final visibleRect = game.camera.visibleWorldRect;
   final topRight = visibleRect.topRight.toVector2();
@@ -297,14 +218,12 @@ List<Wall> createBoundariesWithoutTop(Forge2DGame game) {
   final topLeft = visibleRect.topLeft.toVector2();
 
   return [
-    // No top wall - balls can fall in from above
-    Wall(topRight, bottomRight), // Right wall
-    Wall(bottomRight, bottomLeft), // Bottom wall
-    Wall(bottomLeft, topLeft), // Left wall
+    Wall(topRight - Vector2(10, 0), bottomRight - Vector2(10, 0)),
+    Wall(bottomRight, bottomLeft),
+    Wall(bottomLeft - Vector2(-10, 0), topLeft - Vector2(-10, 0)),
   ];
 }
 
-// Alternative: Create boundaries with an invisible top (if you want to keep the function name)
 List<Wall> createBoundaries(Forge2DGame game) {
   return createBoundariesWithoutTop(game);
 }

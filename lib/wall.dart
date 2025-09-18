@@ -1,5 +1,4 @@
 import 'dart:ui';
-
 import 'package:flame/components.dart';
 import 'package:flame_forge2d/body_component.dart';
 import 'package:flame_forge2d/flame_forge2d.dart';
@@ -17,9 +16,10 @@ class Wall extends BodyComponent {
     final body = world.createBody(bodyDef);
 
     final shape = EdgeShape()..set(_start, _end);
-    final fixtureDef = FixtureDef(shape)..friction = 0.3;
 
+    final fixtureDef = FixtureDef(shape)..friction = 0.3;
     body.createFixture(fixtureDef);
+
     return body;
   }
 
@@ -27,7 +27,7 @@ class Wall extends BodyComponent {
   void render(Canvas canvas) {
     final paint = Paint()
       ..color = Colors.blue
-      ..strokeWidth = 0.4
+      ..strokeWidth = 0.2
       ..style = PaintingStyle.stroke;
 
     canvas.drawLine(Offset(_start.x, _start.y), Offset(_end.x, _end.y), paint);
